@@ -10,7 +10,10 @@ const messageSchema = new Schema(
     receiver: {
       type: Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+    },
+    group: {
+      type: Schema.Types.ObjectId,
+      ref: "Group",
     },
     content: {
       type: String,
