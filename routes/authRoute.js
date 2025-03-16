@@ -82,16 +82,4 @@ router.get("/logout", async (req, res) => {
   res.status(200).json({ message: "User logged out successfully" });
 });
 
-router.get("/users", async (req, res) => {
-  try {
-    const users = await User.find();
-    res.status(200).json({ success: true, users });
-  } catch (err) {
-    console.log(err);
-    return res
-      .status(500)
-      .json({ success: false, msg: "Error while fetching users" });
-  }
-});
-
 module.exports = router;
