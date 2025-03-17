@@ -42,8 +42,6 @@ app.use(
 app.use("/api/auth", authRoutes);
 app.use("/api/chat", chatRoutes);
 
-const activeUsers = new Map();
-
 handleSocketConnection(io);
 
 server.listen(5000, async () => {
