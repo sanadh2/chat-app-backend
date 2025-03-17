@@ -1,42 +1,94 @@
 const jwt = require("jsonwebtoken");
-const User = require("../models/User");
 const Message = require("../models/Message");
+const Group = require("../models/Group");
 
-const handleSocketConnection = async (socket, next) => {
-  const token = socket.handshake.auth.token;
+const activeUsers = new Map();
 
-  if (!token) return next(new Error("Unauthorized"));
-
-  try {
+const handleSocketConnection = (io) => {
+  io.on("connection", (socket) => {
+    const token = socket.handshake.auth?.token;
+    if (!token) {
+      console.log("Unauthorized socket connection");
+      socket.disconnect();
+      return;
+    }
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id);
+    const userId = decoded.id;
+    const username = decoded.username;
+    activeUsers.set(userId, socket.id);
+    console.log(`User Connected: ${username}`);
 
-    if (!user) return next(new Error("User not found"));
+    io.emit("activeUsers", Array.from(activeUsers.keys()));
 
-    socket.user = user;
-
-    user.online = true;
-    await user.save();
-
-    socket.on("sendMessage", async (data) => {
-      const message = await Message.create({
-        sender: user._id,
-        content: data.content,
+    socket.on("privateMessage", async ({ receiver, content }) => {
+      console.log("priatemsg");
+      const recipientSocketId = activeUsers.get(receiver._id);
+      const newMessage = new Message({
+        sender: userId,
+        receiver: receiver._id,
+        content,
       });
 
-      socket.broadcast.emit("receiveMessage", message);
+      await newMessage.save();
+      if (recipientSocketId) {
+        io.to(recipientSocketId).emit("privateMessage", newMessage.toJSON());
+      }
     });
 
-    socket.on("disconnect", async () => {
-      user.online = false;
-      user.lastSeen = new Date();
-      await user.save();
+    socket.on("typing", ({ recipientId, senderId, username }) => {
+      const recipientSocketId = activeUsers.get(recipientId);
+      if (recipientSocketId) {
+        io.to(recipientSocketId).emit("userTyping", username);
+      }
     });
 
-    next();
-  } catch (err) {
-    next(new Error("Invalid Token"));
-  }
+    socket.on("message", (data) => {
+      const messagePayload = {
+        sender: data.sender,
+        message: data.message,
+      };
+
+      io.emit("message", messagePayload);
+    });
+
+    socket.on("joinGroup", (groupId) => {
+      socket.join(groupId);
+    });
+
+    socket.on("sendGroupMessage", async ({ group, content, sender }) => {
+      const newMessage = await Message.create({
+        sender: userId,
+        group: group._id,
+        content,
+      });
+
+      await Group.findByIdAndUpdate(group._id, {
+        $push: { messages: newMessage._id },
+      });
+      io.to(group._id).emit("groupMessage", {
+        sender,
+        group: group,
+        content,
+        createdAt: newMessage.createdAt,
+      });
+    });
+
+    socket.on("groupTyping", ({ groupId, senderId, username }) => {
+      socket.to(groupId).emit("groupTyping", username);
+    });
+
+    socket.on("disconnect", () => {
+      const userId = Array.from(activeUsers.entries()).find(
+        ([_, socketId]) => socketId === socket.id
+      )?.[0];
+
+      if (userId) {
+        console.log(`User Disconnected: ${userId}`);
+        activeUsers.delete(userId);
+        io.emit("activeUsers", Array.from(activeUsers.keys()));
+      }
+    });
+  });
 };
 
 module.exports = { handleSocketConnection };
